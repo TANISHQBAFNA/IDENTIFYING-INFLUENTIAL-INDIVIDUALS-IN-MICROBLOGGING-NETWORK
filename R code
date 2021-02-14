@@ -1,0 +1,117 @@
+library(igraph)
+library(sna)
+library(networkR)
+library(DirectedClustering)
+# Read data file
+data <- read.csv(file.choose(), header=T)
+y <- data.frame(data$first, data$second)
+# Create network
+net <- graph.data.frame(y, directed=T)
+c <-get.adjacency(net, type=c("both", "upper", "lower"),
+attr=NULL, names=TRUE,sparse=FALSE)
+V(net)
+E(net)
+V(net)$label <- V(net)$name
+V(net)$degree <- degree(c, g=1, nodes=NULL, gmode="digraph", diag=FALSE,
+tmaxdev=FALSE, cmode="freeman", rescale=FALSE, ignore.eval=FALSE)
+set.seed(123)
+# Histogram of node degree
+hist(V(net)$degree,
+col = 'green',
+main = 'Histogram of Node Degree',
+ylab = 'Frequency',
+xlab = 'Degree of Vertices')
+# Network diagram
+set.seed(123)
+plot(net,
+vertex.color = 'green',
+vertext.size = 2,
+edge.arrow.size = 0.1,
+vertex.label.cex = 0.8)
+diameter(net, directed=F, weights = NA)
+edge_density(net, loops = F)
+ecount(net)/(vcount(net)*(vcount(net)-1))
+reciprocity(net)
+# Degree
+V(net)$degree <- degree(c, g=1, nodes=NULL, gmode="digraph", diag=FALSE,
+tmaxdev=FALSE, cmode="freeman", rescale=FALSE, ignore.eval=FALSE)
+set.seed(123)
+plot(net,
+vertex.color = rainbow(52),
+vertex.size = V(net)$degree*0.4,main='DEGREE',
+edge.arrow.size = 0.1,
+layout=layout.kamada.kawai)
+# Closeness
+V(net)$closeness<-closeness(c, g=1, nodes=NULL, gmode="digraph", diag=FALSE,
+tmaxdev=FALSE, cmode="undirected", geodist.precomp=NULL,
+rescale=FALSE, ignore.eval=TRUE)
+set.seed(123)
+plot(net,
+vertex.color = rainbow(52),
+vertex.size = V(net)$closeness*40,main='CLOSENESS',
+edge.arrow.size = 0.1,
+layout=layout.kamada.kawai)
+# Betweenness
+betweenness.igraph(net, directed=T, weights=NA)
+V(net)$betweenness <-betweenness(c, g=1, nodes=NULL, gmode="digraph", diag=FALSE,
+tmaxdev=FALSE, cmode="directed", geodist.precomp=NULL,
+rescale=FALSE, ignore.eval=TRUE)
+set.seed(123)
+plot(net,
+vertex.color = rainbow(52),
+vertex.size = V(net)$betweenness*0.06,main='BETWEENNESS',
+edge.arrow.size = 0.1,
+layout=layout.kamada.kawai)
+edge_betweenness (net, directed=T, weights=NA)
+set. Seed(123)
+plot(net,
+vertex.color = rainbow (52),
+vertex.size = edge_betweenness(net, directed=T, weights=NA)*0.34,main='EDGE BETWEENNESS',
+edge.arrow.size = 0.1,
+Layout=layout.kamada.kawai)
+# Prestige
+V(net)$prestige<- prestige(c, g=1, nodes=NULL, gmode="digraph", diag=FALSE,
+cmode="indegree", tmaxdev=FALSE, rescale=TRUE, tol=1e-07)
+set.seed(123)
+plot(net,
+vertex.color = rainbow(52),
+vertex.size = V(net)$prestige*150,main='PRESTIGE',
+edge.arrow.size = 0.1,
+layout=layout.kamada.kawai)
+# PageRank
+V(net)$pg<- page_rank(net, algo = c("prpack", "arpack", "power"), vids = V(net),
+directed = TRUE, damping = 0.85, personalized = NULL, weights = NULL,
+options = NULL)$vector
+plot(net,
+vertex.size=V(net)$pg*300,
+main = 'PAGE RANK',
+vertex.color = rainbow(52),
+edge.arrow.size=0.1,
+layout = layout.kamada.kawai)
+#Hubs and Authorities
+hits(c, maxiter = 100L, tol = 1e-05)
+net <- graph.data.frame(y, directed=T)
+hs <- hub_score(net)$vector
+as <- authority_score(net,scale = TRUE, weights = NULL,)$vector
+par(mfrow=c(1,2))
+set.seed(123)
+plot(net,
+vertex.size=hs*30,
+main = 'HUBS',
+vertex.color = rainbow(52),
+edge.arrow.size=0.1,
+layout = layout.kamada.kawai)
+plot(net,
+vertex.size=as*30,
+main = 'AUTHORITIES',
+vertex.color = rainbow(52),
+edge.arrow.size=0.1,
+layout = layout.kamada.kawai)
+par(mfrow=c(1,1))
+# Community detection
+net <- graph.data.frame(y, directed = F)
+cnet <- cluster_edge_betweenness(net)
+plot(cnet,main="COMMUNITY DETECTION",
+net,
+vertex.size = 10,
+vertex.label.cex = 0.8
