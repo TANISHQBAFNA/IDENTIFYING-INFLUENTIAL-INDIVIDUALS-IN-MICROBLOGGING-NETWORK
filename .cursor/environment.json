@@ -1,0 +1,4 @@
+{
+  "name": "R social-network analysis",
+  "install": "bash .cursor/install.sh"
+}
