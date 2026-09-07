@@ -216,9 +216,9 @@ export default function App() {
 
           <section>
             <h2 className="mb-3 font-serif text-2xl">All accounts</h2>
-            <div className="overflow-x-auto rounded-sm border border-line bg-panel">
+            <div className="max-h-[28rem] overflow-auto rounded-sm border border-line bg-panel">
               <table className="min-w-full text-left text-sm">
-                <thead className="bg-paper text-xs tracking-wide text-muted uppercase">
+                <thead className="sticky top-0 z-10 bg-paper text-xs tracking-wide text-muted uppercase">
                   <tr>
                     {TABLE_KEYS.map((key) => (
                       <th key={key} className="px-2 py-2 font-medium">

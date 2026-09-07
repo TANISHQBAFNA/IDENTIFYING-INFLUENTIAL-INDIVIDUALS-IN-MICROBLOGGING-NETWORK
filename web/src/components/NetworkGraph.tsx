@@ -119,8 +119,22 @@ export function NetworkGraph({ analysis, sizeMetric, selectedId, onSelect }: Pro
     cy.on('tap', 'node', tapNode)
     cy.on('tap', tapBg)
 
+    const onResize = () => {
+      cy.resize()
+    }
+    window.addEventListener('resize', onResize)
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) cy.resize()
+      },
+      { threshold: 0.05 },
+    )
+    io.observe(host)
+
     cyRef.current = cy
     return () => {
+      window.removeEventListener('resize', onResize)
+      io.disconnect()
       cy.destroy()
       cyRef.current = null
     }
@@ -163,7 +177,7 @@ export function NetworkGraph({ analysis, sizeMetric, selectedId, onSelect }: Pro
 
   return (
     <figure className="flex h-full min-h-[28rem] flex-col">
-      <div ref={hostRef} className="min-h-[24rem] flex-1 rounded-sm bg-[#fffcf7]" />
+      <div ref={hostRef} className="h-[28rem] w-full rounded-sm bg-[#fffcf7]" />
       <figcaption className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted">
         <span>Size = {METRIC_LABELS[sizeMetric].toLowerCase()}. Edge width = edge betweenness. Color = community.</span>
         <span className="flex flex-wrap gap-2">
