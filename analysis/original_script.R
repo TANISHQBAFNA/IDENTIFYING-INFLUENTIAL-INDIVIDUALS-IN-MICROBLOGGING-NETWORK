@@ -1,3 +1,5 @@
+# Provenance copy of the original interactive lab script (file.choose(), typos).
+# For a headless run that writes JSON + PNGs, use ../run_analysis.R instead.
 library(igraph)
 library(sna)
 library(networkR)

@@ -1,128 +1,199 @@
 #!/usr/bin/env Rscript
-# Headless runner for the social-network analysis in the file "R code".
-# The original script reads data via read.csv(file.choose()) and renders plots
-# to an interactive device. This runner takes a data path (default:
-# data/sample_network.csv), writes every figure to output/ as PNG, and fixes a
-# few typos in the original (set. Seed -> set.seed, Layout -> layout,
-# vertext.size -> vertex.size) so it runs non-interactively.
+# Headless runner for the original analysis/original_script.R workflow.
+# Computes centrality, prestige, PageRank, HITS, clustering, and communities,
+# writes JSON for the web dashboard, and optional PNG fallbacks.
+#
+# Usage: Rscript run_analysis.R [data.csv] [out_dir]
+# Defaults: data/sample_network.csv  output
 
-suppressMessages({
-  library(igraph)
-  library(sna)
-  library(networkR)
-  library(DirectedClustering)
-})
+suppressMessages(library(igraph))
 
 args <- commandArgs(trailingOnly = TRUE)
 data_path <- if (length(args) >= 1) args[1] else "data/sample_network.csv"
 out_dir <- if (length(args) >= 2) args[2] else "output"
 dir.create(out_dir, showWarnings = FALSE, recursive = TRUE)
-
 png_path <- function(name) file.path(out_dir, name)
 
+json_escape <- function(x) {
+  x <- gsub("\\", "\\\\", x, fixed = TRUE)
+  x <- gsub("\"", "\\\"", x, fixed = TRUE)
+  x <- gsub("\n", "\\n", x, fixed = TRUE)
+  x
+}
+
+json_num <- function(x) {
+  if (length(x) == 0 || is.na(x) || !is.finite(x)) return("null")
+  format(unname(x), scientific = FALSE, trim = TRUE, digits = 12)
+}
+
 # --- Read data ---------------------------------------------------------------
-data <- read.csv(data_path, header = TRUE)
-y <- data.frame(data$first, data$second)
+raw <- read.csv(data_path, header = TRUE, stringsAsFactors = FALSE)
+if (!all(c("first", "second") %in% names(raw))) {
+  stop("CSV must have columns named first and second")
+}
+y <- data.frame(from = raw$first, to = raw$second, stringsAsFactors = FALSE)
+y <- y[nzchar(y$from) & nzchar(y$to), ]
 
 # --- Build network -----------------------------------------------------------
-net <- graph.data.frame(y, directed = TRUE)
+net <- graph_from_data_frame(y, directed = TRUE)
 n <- vcount(net)
-c <- get.adjacency(net, type = "both", attr = NULL, names = TRUE, sparse = FALSE)
-cat("Vertices:", n, " Edges:", ecount(net), "\n")
-V(net)$label <- V(net)$name
-V(net)$degree <- sna::degree(c, gmode = "digraph", diag = FALSE, cmode = "freeman", rescale = FALSE)
+m <- ecount(net)
+names_v <- V(net)$name
 
-# --- Histogram of node degree ------------------------------------------------
+V(net)$degree <- degree(net, mode = "all")
+V(net)$in_degree <- degree(net, mode = "in")
+V(net)$out_degree <- degree(net, mode = "out")
+V(net)$closeness <- closeness(net, mode = "all", normalized = FALSE)
+V(net)$betweenness <- betweenness(net, directed = TRUE, weights = NA, normalized = FALSE)
+# Prestige (indegree, rescaled): in-links / (n-1), matching sna::prestige(cmode="indegree", rescale=TRUE)
+V(net)$prestige <- if (n > 1) V(net)$in_degree / (n - 1) else V(net)$in_degree
+V(net)$page_rank <- page_rank(net, directed = TRUE, damping = 0.85)$vector
+V(net)$hub <- hub_score(net, scale = TRUE)$vector
+V(net)$authority <- authority_score(net, scale = TRUE)$vector
+
+netu <- as.undirected(net, mode = "collapse")
+local_cc <- transitivity(netu, type = "local", isolates = "zero")
+V(net)$clustering <- ifelse(is.na(local_cc), 0, local_cc)
+
+cnet <- cluster_edge_betweenness(netu)
+V(net)$community <- membership(cnet)
+n_comm <- length(unique(V(net)$community))
+
+eb <- edge_betweenness(net, directed = TRUE, weights = NA)
+E(net)$betweenness <- eb
+
+diam <- diameter(net, directed = FALSE, weights = NA)
+dens <- edge_density(net, loops = FALSE)
+recp <- reciprocity(net)
+
+cat("Vertices:", n, " Edges:", m, "\n")
+cat("diameter:", diam, "\n")
+cat("edge_density:", dens, "\n")
+cat("reciprocity:", recp, "\n")
+cat("communities:", n_comm, "\n")
+
+# Qualitative palette (not rainbow): color encodes community
+comm_palette <- c("#1d4ed8", "#b45309", "#0f766e", "#9f1239", "#6d28d9",
+                  "#365314", "#075985", "#9a3412", "#334155", "#a16207")
+node_fill <- comm_palette[((V(net)$community - 1) %% length(comm_palette)) + 1]
+eb_width <- 0.4 + 2.6 * (eb / max(eb, na.rm = TRUE))
+eb_width[!is.finite(eb_width)] <- 0.4
+
+size_from <- function(values, min_s = 6, max_s = 28) {
+  rng <- range(values, na.rm = TRUE)
+  if (!is.finite(rng[1]) || rng[1] == rng[2]) return(rep((min_s + max_s) / 2, length(values)))
+  min_s + (values - rng[1]) / (rng[2] - rng[1]) * (max_s - min_s)
+}
+
+plot_metric <- function(filename, title, sizes, edge_w = 0.5) {
+  png(png_path(filename), width = 1000, height = 800)
+  set.seed(123)
+  plot(net,
+       vertex.color = node_fill,
+       vertex.size = sizes,
+       vertex.label.cex = 0.7,
+       vertex.frame.color = "#0f172a",
+       edge.arrow.size = 0.15,
+       edge.width = edge_w,
+       edge.color = "#94a3b8",
+       main = title,
+       layout = layout_with_kk(net))
+  dev.off()
+}
+
 png(png_path("01_degree_histogram.png"), width = 900, height = 700)
-set.seed(123)
-hist(V(net)$degree, col = "green",
+hist(V(net)$degree, col = "#1d4ed8", border = "white",
      main = "Histogram of Node Degree",
      ylab = "Frequency", xlab = "Degree of Vertices")
 dev.off()
 
-# --- Network diagram ---------------------------------------------------------
 png(png_path("02_network_diagram.png"), width = 1000, height = 800)
 set.seed(123)
-plot(net, vertex.color = "green", vertex.size = 6,
-     edge.arrow.size = 0.1, vertex.label.cex = 0.8)
+plot(net,
+     vertex.color = node_fill,
+     vertex.size = 8,
+     vertex.label.cex = 0.7,
+     edge.arrow.size = 0.15,
+     edge.color = "#94a3b8",
+     main = "Network (color = community)",
+     layout = layout_with_kk(net))
 dev.off()
 
-cat("diameter:", diameter(net, directed = FALSE, weights = NA), "\n")
-cat("edge_density:", edge_density(net, loops = FALSE), "\n")
-cat("density(manual):", ecount(net) / (vcount(net) * (vcount(net) - 1)), "\n")
-cat("reciprocity:", reciprocity(net), "\n")
+plot_metric("03_degree.png", "Degree", size_from(V(net)$degree))
+plot_metric("04_closeness.png", "Closeness", size_from(V(net)$closeness))
+plot_metric("05_betweenness.png", "Betweenness", size_from(V(net)$betweenness))
+plot_metric("06_edge_betweenness.png", "Edge betweenness (edge width)",
+            size_from(V(net)$degree, 6, 14), edge_w = eb_width)
+plot_metric("07_prestige.png", "Prestige (in-degree, scaled)", size_from(V(net)$prestige))
+plot_metric("08_pagerank.png", "PageRank", size_from(V(net)$page_rank))
 
-pal <- rainbow(n)
-
-# --- Degree ------------------------------------------------------------------
-png(png_path("03_degree.png"), width = 1000, height = 800)
-set.seed(123)
-plot(net, vertex.color = pal, vertex.size = V(net)$degree * 0.4, main = "DEGREE",
-     edge.arrow.size = 0.1, layout = layout.kamada.kawai)
-dev.off()
-
-# --- Closeness ---------------------------------------------------------------
-V(net)$closeness <- sna::closeness(c, gmode = "digraph", diag = FALSE,
-                                   cmode = "undirected", rescale = FALSE, ignore.eval = TRUE)
-png(png_path("04_closeness.png"), width = 1000, height = 800)
-set.seed(123)
-plot(net, vertex.color = pal, vertex.size = V(net)$closeness * 40, main = "CLOSENESS",
-     edge.arrow.size = 0.1, layout = layout.kamada.kawai)
-dev.off()
-
-# --- Betweenness -------------------------------------------------------------
-V(net)$betweenness <- sna::betweenness(c, gmode = "digraph", diag = FALSE,
-                                       cmode = "directed", rescale = FALSE, ignore.eval = TRUE)
-png(png_path("05_betweenness.png"), width = 1000, height = 800)
-set.seed(123)
-plot(net, vertex.color = pal, vertex.size = V(net)$betweenness * 0.06, main = "BETWEENNESS",
-     edge.arrow.size = 0.1, layout = layout.kamada.kawai)
-dev.off()
-
-# --- Edge betweenness --------------------------------------------------------
-png(png_path("06_edge_betweenness.png"), width = 1000, height = 800)
-set.seed(123)
-plot(net, vertex.color = pal,
-     vertex.size = edge_betweenness(net, directed = TRUE, weights = NA) * 0.34,
-     main = "EDGE BETWEENNESS", edge.arrow.size = 0.1, layout = layout.kamada.kawai)
-dev.off()
-
-# --- Prestige ----------------------------------------------------------------
-V(net)$prestige <- sna::prestige(c, gmode = "digraph", diag = FALSE,
-                                 cmode = "indegree", rescale = TRUE, tol = 1e-07)
-png(png_path("07_prestige.png"), width = 1000, height = 800)
-set.seed(123)
-plot(net, vertex.color = pal, vertex.size = V(net)$prestige * 150, main = "PRESTIGE",
-     edge.arrow.size = 0.1, layout = layout.kamada.kawai)
-dev.off()
-
-# --- PageRank ----------------------------------------------------------------
-V(net)$pg <- page_rank(net, vids = V(net), directed = TRUE, damping = 0.85)$vector
-png(png_path("08_pagerank.png"), width = 1000, height = 800)
-set.seed(123)
-plot(net, vertex.size = V(net)$pg * 300, main = "PAGE RANK",
-     vertex.color = pal, edge.arrow.size = 0.1, layout = layout.kamada.kawai)
-dev.off()
-
-# --- Hubs and Authorities ----------------------------------------------------
-print(hits(c, maxiter = 100L, tol = 1e-05))
-hs <- hub_score(net)$vector
-as <- authority_score(net, scale = TRUE, weights = NULL)$vector
 png(png_path("09_hubs_authorities.png"), width = 1400, height = 700)
 par(mfrow = c(1, 2))
 set.seed(123)
-plot(net, vertex.size = hs * 30, main = "HUBS", vertex.color = pal,
-     edge.arrow.size = 0.1, layout = layout.kamada.kawai)
-plot(net, vertex.size = as * 30, main = "AUTHORITIES", vertex.color = pal,
-     edge.arrow.size = 0.1, layout = layout.kamada.kawai)
+plot(net, vertex.size = size_from(V(net)$hub), main = "Hubs",
+     vertex.color = node_fill, edge.arrow.size = 0.15,
+     edge.color = "#94a3b8", layout = layout_with_kk(net), vertex.label.cex = 0.6)
+plot(net, vertex.size = size_from(V(net)$authority), main = "Authorities",
+     vertex.color = node_fill, edge.arrow.size = 0.15,
+     edge.color = "#94a3b8", layout = layout_with_kk(net), vertex.label.cex = 0.6)
 par(mfrow = c(1, 1))
 dev.off()
 
-# --- Community detection -----------------------------------------------------
-netu <- graph.data.frame(y, directed = FALSE)
-cnet <- cluster_edge_betweenness(netu)
 png(png_path("10_community_detection.png"), width = 1000, height = 800)
-plot(cnet, netu, main = "COMMUNITY DETECTION", vertex.size = 10, vertex.label.cex = 0.8)
+set.seed(123)
+plot(cnet, netu, main = "Community detection", vertex.size = 10, vertex.label.cex = 0.8)
 dev.off()
 
-cat("\nDone. Figures written to '", out_dir, "/'\n", sep = "")
+# --- JSON for the web dashboard ----------------------------------------------
+node_json <- vapply(seq_len(n), function(i) {
+  paste0(
+    "{\"id\":\"", json_escape(names_v[i]), "\"",
+    ",\"degree\":", json_num(V(net)$degree[i]),
+    ",\"inDegree\":", json_num(V(net)$in_degree[i]),
+    ",\"outDegree\":", json_num(V(net)$out_degree[i]),
+    ",\"closeness\":", json_num(V(net)$closeness[i]),
+    ",\"betweenness\":", json_num(V(net)$betweenness[i]),
+    ",\"prestige\":", json_num(V(net)$prestige[i]),
+    ",\"pageRank\":", json_num(V(net)$page_rank[i]),
+    ",\"hub\":", json_num(V(net)$hub[i]),
+    ",\"authority\":", json_num(V(net)$authority[i]),
+    ",\"clustering\":", json_num(V(net)$clustering[i]),
+    ",\"community\":", json_num(as.integer(V(net)$community[i])),
+    "}"
+  )
+}, character(1))
+
+ends <- ends(net, E(net), names = TRUE)
+edge_json <- vapply(seq_len(m), function(i) {
+  paste0(
+    "{\"source\":\"", json_escape(ends[i, 1]),
+    "\",\"target\":\"", json_escape(ends[i, 2]),
+    "\",\"betweenness\":", json_num(E(net)$betweenness[i]), "}"
+  )
+}, character(1))
+
+payload <- paste0(
+  "{\n",
+  "  \"summary\": {\n",
+  "    \"vertices\": ", n, ",\n",
+  "    \"edges\": ", m, ",\n",
+  "    \"diameter\": ", json_num(diam), ",\n",
+  "    \"density\": ", json_num(dens), ",\n",
+  "    \"reciprocity\": ", json_num(recp), ",\n",
+  "    \"communities\": ", n_comm, "\n",
+  "  },\n",
+  "  \"nodes\": [\n    ", paste(node_json, collapse = ",\n    "), "\n  ],\n",
+  "  \"edges\": [\n    ", paste(edge_json, collapse = ",\n    "), "\n  ]\n",
+  "}\n"
+)
+
+json_out <- file.path(out_dir, "metrics.json")
+writeLines(payload, json_out, useBytes = TRUE)
+
+web_public <- "web/public"
+if (dir.exists(web_public)) {
+  writeLines(payload, file.path(web_public, "metrics-from-r.json"), useBytes = TRUE)
+}
+
+cat("JSON written to ", json_out, "\n", sep = "")
+cat("Done. Figures written to '", out_dir, "/'\n", sep = "")

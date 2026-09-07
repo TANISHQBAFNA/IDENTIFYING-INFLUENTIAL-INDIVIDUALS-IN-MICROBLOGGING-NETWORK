@@ -2,3 +2,6 @@ output/
 .Rhistory
 .RData
 .Rproj.user/
+web/node_modules/
+web/dist/
+web/coverage/
